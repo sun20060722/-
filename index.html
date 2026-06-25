@@ -3,12 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>字·墟 - AR</title>
+    <title>字·墟</title>
 
-    <!-- A-Frame 库 -->
+    <!-- A-Frame 库（无需 AR.js） -->
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    <!-- AR.js 库（使用 jsDelivr CDN，稳定可用） -->
-    <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@master/aframe/build/aframe-ar.js"></script>
 
     <style>
         * { margin: 0; padding: 0; }
@@ -43,10 +41,10 @@
     <div id="notification" class="notification"></div>
     <div id="overlay"><div id="poem-container"></div></div>
 
-    <!-- 启动按钮（必须用户点击才能请求相机权限） -->
+    <!-- 启动按钮（必须用户点击才能启用陀螺仪和音频） -->
     <div id="start-screen" style="
         position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(0,0,0,0.9); z-index: 999;
+        background: rgba(0,0,0,0.95); z-index: 999;
         display: flex; flex-direction: column; justify-content: center; align-items: center;
         color: #e8c97a; font-family: 'Songti SC', '宋体', serif; cursor: pointer;
     ">
@@ -55,18 +53,17 @@
             padding: 15px 40px; border: 1px solid #e8c97a; border-radius: 4px;
             font-size: 18px; background: transparent; color: #e8c97a;
         ">触 碰 墓 碑</div>
-        <div style="margin-top: 20px; font-size: 12px; color: #8a7a5a;">点击后请允许相机</div>
+        <div style="margin-top: 20px; font-size: 12px; color: #8a7a5a;">点击后允许动作感应</div>
     </div>
 
-    <!-- AR.js 场景 -->
-    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
-        <a-marker preset="hiro">
-            <a-entity id="character-group" position="0 0.2 0"></a-entity>
-        </a-marker>
-        <a-entity camera></a-entity>
+    <!-- 3D 场景 -->
+    <a-scene background="color: #000" device-orientation-permission-ui="enabled: true">
+        <!-- 相机：陀螺仪控制视角 -->
+        <a-camera id="main-camera" look-controls="pointerLockEnabled: false" position="0 1.6 0">
+            <!-- 所有漂浮的文字都将动态添加到这个场景中 -->
+        </a-camera>
     </a-scene>
 
-    <!-- 主控脚本 -->
     <script>
         // ==================== 音效管理器 ====================
         const AudioManager = {
@@ -138,15 +135,26 @@
             return new Promise(resolve => {
                 setTimeout(() => {
                     const container = document.getElementById('poem-container');
+                    // 清除上一句残留，防止重叠
+                    while (container.firstChild) {
+                        container.removeChild(container.firstChild);
+                    }
+
                     const line = document.createElement('div');
                     line.className = 'poem-line';
                     line.textContent = text;
                     container.appendChild(line);
-                    requestAnimationFrame(() => { line.style.opacity = '1'; });
+
+                    requestAnimationFrame(() => {
+                        line.style.opacity = '1';
+                    });
+
                     setTimeout(() => {
                         line.style.opacity = '0';
                         setTimeout(() => {
-                            if(line.parentNode) container.removeChild(line);
+                            if (line.parentNode) {
+                                container.removeChild(line);
+                            }
                             resolve();
                         }, 1500);
                     }, duration);
@@ -156,8 +164,11 @@
 
         async function playPoemSequence(lines, lineDuration=3000) {
             for(let i=0; i<lines.length; i++) {
-                if(lines[i] === '') await new Promise(r => setTimeout(r, 1500));
-                else await showPoemLine(lines[i], 500, lineDuration);
+                if(lines[i] === '') {
+                    await new Promise(r => setTimeout(r, 1500));
+                } else {
+                    await showPoemLine(lines[i], 500, lineDuration);
+                }
             }
         }
 
@@ -177,53 +188,64 @@
         // ==================== 主函数 ====================
         async function runARExperience() {
             AudioManager.init();
-            const characterGroup = document.getElementById('character-group');
+            const scene = document.querySelector('a-scene');
 
             // ========== 第一幕：废墟的苏醒 ==========
             AudioManager.startDrone();
             playPoemSequence(POEM_LINES.act1, 3000);
 
             const total = ANCIENT_CHARS.length;
-            const randomPositions = [];
+            // 随机生成每个古字的位置：距离 1.5~5 米，高度 -1~3 米，水平角度随机
+            const positions = [];
             for (let i = 0; i < total; i++) {
                 const angle = Math.random() * Math.PI * 2;
-                const dist = 0.3 + Math.random() * 0.5;
-                const x = Math.cos(angle) * dist;
-                const z = Math.sin(angle) * dist;
-                const y = 0.2 + Math.random() * 0.7;
-                randomPositions.push({ x: x.toFixed(2), y: y.toFixed(2), z: z.toFixed(2) });
+                const radius = 1.5 + Math.random() * 3.5; // 1.5 到 5 米
+                const x = Math.cos(angle) * radius;
+                const z = Math.sin(angle) * radius;
+                const y = (Math.random() - 0.3) * 3; // -0.9 到 2.1 米
+                positions.push({ x: x.toFixed(2), y: y.toFixed(2), z: z.toFixed(2) });
             }
 
+            // 逐个出现
             for (let i = 0; i < total; i++) {
-                await new Promise(resolve => {
-                    setTimeout(() => {
-                        const entity = document.createElement('a-entity');
-                        entity.setAttribute('id', `char-${ANCIENT_CHARS[i]}`);
-                        entity.setAttribute('gltf-model', `assets/models/${ANCIENT_CHARS[i]}.glb`);
-                        entity.setAttribute('position', '0 0.3 0');
-                        entity.setAttribute('scale', '0.01 0.01 0.01');
-                        entity.setAttribute('animation__appear', {
-                            property: 'scale',
-                            to: '1 1 1',
-                            dur: 1500,
-                            easing: 'easeOutQuad'
-                        });
-                        entity.setAttribute('animation__float', {
-                            property: 'position',
-                            to: `${randomPositions[i].x} ${randomPositions[i].y} ${randomPositions[i].z}`,
-                            dur: 2500,
-                            easing: 'easeInOutQuad'
-                        });
-                        characterGroup.appendChild(entity);
-                        AudioManager.playTone(220 + i * 25, 0.4, 'sine', 0.04);
-                        resolve();
-                    }, i * 1200);
+                await new Promise(resolve => setTimeout(resolve, 1500));
+
+                const entity = document.createElement('a-entity');
+                entity.setAttribute('id', `char-${ANCIENT_CHARS[i]}`);
+                entity.setAttribute('gltf-model', `assets/models/${ANCIENT_CHARS[i]}.glb`);
+
+                // 初始位置在相机前方一点（0 0 -1），然后移动到目标位置
+                entity.setAttribute('position', '0 0.5 -2');
+                entity.setAttribute('scale', '0.01 0.01 0.01');
+
+                // 随机初始旋转（各个角度不同）
+                const rotX = (Math.random() - 0.5) * 60;
+                const rotY = Math.random() * 360;
+                const rotZ = (Math.random() - 0.5) * 30;
+                entity.setAttribute('rotation', `${rotX} ${rotY} ${rotZ}`);
+
+                // 弹出动画
+                entity.setAttribute('animation__appear', {
+                    property: 'scale',
+                    to: '1 1 1',
+                    dur: 1500,
+                    easing: 'easeOutQuad'
                 });
+                // 移动到随机位置
+                entity.setAttribute('animation__float', {
+                    property: 'position',
+                    to: `${positions[i].x} ${positions[i].y} ${positions[i].z}`,
+                    dur: 2500,
+                    easing: 'easeInOutQuad'
+                });
+
+                scene.appendChild(entity);
+                AudioManager.playTone(220 + i * 25, 0.4, 'sine', 0.04);
             }
 
             await new Promise(r => setTimeout(r, 4000));
 
-            // 绑定点击提示
+            // 点击提示
             ANCIENT_CHARS.forEach(charId => {
                 const entity = document.getElementById(`char-${charId}`);
                 if (entity) {
@@ -236,24 +258,30 @@
             // ========== 第二幕：虚假的永生 ==========
             playPoemSequence(POEM_LINES.act2, 3000);
 
+            // 现代字出现在随机远处
             for (let i = 0; i < MODERN_CHARS.length; i++) {
                 await new Promise(resolve => {
                     setTimeout(() => {
                         const entity = document.createElement('a-entity');
                         entity.setAttribute('id', `modern-${MODERN_CHARS[i]}`);
                         entity.setAttribute('gltf-model', `assets/models/${MODERN_CHARS[i]}.glb`);
-                        const dropX = (Math.random() - 0.5) * 0.4;
-                        const dropZ = (Math.random() - 0.5) * 0.4;
-                        entity.setAttribute('position', `${dropX} 2 ${dropZ}`);
-                        entity.setAttribute('scale', '1.3 1.3 1.3');
+
+                        const angle = Math.random() * Math.PI * 2;
+                        const radius = 2 + Math.random() * 3;
+                        const x = Math.cos(angle) * radius;
+                        const z = Math.sin(angle) * radius;
+                        const y = Math.random() * 2 - 0.5;
+
+                        entity.setAttribute('position', `${x.toFixed(2)} 4 ${z.toFixed(2)}`);
+                        entity.setAttribute('scale', '1.5 1.5 1.5');
                         entity.setAttribute('animation__fall', {
                             property: 'position',
-                            from: `${dropX} 3 ${dropZ}`,
-                            to: `${dropX} 0.3 ${dropZ}`,
-                            dur: 1000,
+                            from: `${x.toFixed(2)} 4 ${z.toFixed(2)}`,
+                            to: `${x.toFixed(2)} ${y} ${z.toFixed(2)}`,
+                            dur: 1500,
                             easing: 'easeInBounce'
                         });
-                        characterGroup.appendChild(entity);
+                        scene.appendChild(entity);
                         AudioManager.playMetalSound();
                         resolve();
                     }, i * 2000);
@@ -266,6 +294,7 @@
             AudioManager.stopDrone();
             playPoemSequence(POEM_LINES.act3, 3500);
 
+            // 古字重新排列成诗行（在视野前方整齐排列）
             for (let i = 0; i < total; i++) {
                 const entity = document.getElementById(`char-${ANCIENT_CHARS[i]}`);
                 if (entity) {
@@ -273,8 +302,15 @@
                     const col = i % 4;
                     entity.setAttribute('animation__rearrange', {
                         property: 'position',
-                        to: `${(col - 1.5) * 0.3} ${1.2 - row * 0.25} -0.5`,
+                        to: `${(col - 1.5) * 0.4} ${1.2 - row * 0.3} -3`,
                         dur: 4000,
+                        easing: 'easeInOutQuad'
+                    });
+                    // 同时旋转归正
+                    entity.setAttribute('animation__align', {
+                        property: 'rotation',
+                        to: '0 0 0',
+                        dur: 3000,
                         easing: 'easeInOutQuad'
                     });
                 }
@@ -285,7 +321,7 @@
                 if (entity) {
                     entity.setAttribute('animation__push', {
                         property: 'position',
-                        to: `${(i - 1) * 1.5} 0.1 -0.5`,
+                        to: `${(i - 1) * 2} -0.5 -5`,
                         dur: 3000,
                         easing: 'easeInOutQuad'
                     });
@@ -293,12 +329,33 @@
             });
         }
 
-        // ==================== 点击启动 ====================
+        // ==================== 启动按钮（点击后请求陀螺仪权限并开始体验） ====================
         document.getElementById('start-button').addEventListener('click', () => {
+            // 隐藏启动画面
             document.getElementById('start-screen').style.display = 'none';
-            if (navigator.vibrate) navigator.vibrate(300);
-            runARExperience();
+
+            // 请求设备方向权限（iOS 需要）
+            if (typeof DeviceOrientationEvent !== 'undefined' &&
+                typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            startExperience();
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // Android 或桌面直接开始
+                startExperience();
+            }
         });
+
+        function startExperience() {
+            // 允许振动
+            if (navigator.vibrate) navigator.vibrate(300);
+            // 启动体验
+            runARExperience();
+        }
     </script>
 </body>
 </html>
