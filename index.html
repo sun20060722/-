@@ -60,9 +60,49 @@
     </a-scene>
 
     <script>
-        // ==================== 音效管理器（保持不变） ====================
-        const AudioManager = { /* ... 同之前代码，此处省略以节省篇幅 ... */ };
-        // 实际使用时请将上一条消息中的 AudioManager 完整复制过来
+        // ==================== 音效管理器（完整版） ====================
+        const AudioManager = {
+            audioContext: null,
+            init() {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            },
+            playTone(freq, dur, type='sine', vol=0.05) {
+                if(!this.audioContext) return;
+                const o = this.audioContext.createOscillator();
+                const g = this.audioContext.createGain();
+                o.type = type; o.frequency.value = freq;
+                g.gain.value = vol;
+                g.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime + dur);
+                o.connect(g); g.connect(this.audioContext.destination);
+                o.start(); o.stop(this.audioContext.currentTime + dur);
+            },
+            playMetalSound() {
+                if(!this.audioContext) return;
+                const o = this.audioContext.createOscillator();
+                const g = this.audioContext.createGain();
+                o.type = 'square'; o.frequency.value = 200;
+                g.gain.value = 0.06;
+                g.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime+0.2);
+                o.connect(g); g.connect(this.audioContext.destination);
+                o.start(); o.stop(this.audioContext.currentTime+0.2);
+            },
+            startDrone() {
+                if(!this.audioContext) return;
+                this.droneOsc = this.audioContext.createOscillator();
+                this.droneGain = this.audioContext.createGain();
+                this.droneOsc.type = 'sine'; this.droneOsc.frequency.value = 55;
+                this.droneGain.gain.value = 0.02;
+                this.droneOsc.connect(this.droneGain);
+                this.droneGain.connect(this.audioContext.destination);
+                this.droneOsc.start();
+            },
+            stopDrone() {
+                if(this.droneGain) {
+                    this.droneGain.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime+1);
+                    setTimeout(() => { if(this.droneOsc) this.droneOsc.stop(); }, 1000);
+                }
+            }
+        };
 
         // ==================== 诗句管理 ====================
         const POEM_LINES = {
@@ -71,7 +111,6 @@
             act3: [ '耒在墙上锈成问号','蓑衣挂在博物馆的玻璃后面','碓声沉入溪底','豳风还在吹','', '只是无人识得','那个字','怎么读','', '我们把这些字还给你','在它们彻底消失之前','', '但你能接住吗','你连它们叫什么','都不知道' ]
         };
 
-        // 诗句显示函数（已修复重叠）
         function showPoemLine(text, delay, duration) {
             return new Promise(resolve => {
                 setTimeout(() => {
@@ -106,44 +145,34 @@
             setTimeout(() => { n.style.opacity = '0'; }, duration);
         }
 
-        // ==================== 核心：Canvas 绘制残破汉字 ====================
+        // ==================== Canvas 绘制残破汉字 ====================
         function createAncientTexture(character, baseColor = '#e8c97a') {
             const canvas = document.createElement('canvas');
             canvas.width = 256;
             canvas.height = 256;
             const ctx = canvas.getContext('2d');
-
-            // 透明背景
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // 设置文字样式
             ctx.font = 'bold 180px "Songti SC", "宋体", "SimSun", "Noto Serif SC", serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillStyle = baseColor;
-
-            // 先正常绘制文字
             ctx.fillText(character, 128, 128);
 
-            // 制造残破效果：随机清除一些像素块
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const data = imageData.data;
-            const damageProbability = 0.08; // 8% 的像素被随机破坏
-            const blockSize = 4; // 每次破坏一个小方块
-
+            const damageProbability = 0.08;
+            const blockSize = 4;
             for (let y = 0; y < canvas.height; y += blockSize) {
                 for (let x = 0; x < canvas.width; x += blockSize) {
                     if (Math.random() < damageProbability) {
-                        // 随机决定是擦除（完全透明）还是变暗
                         const erase = Math.random() < 0.7;
                         for (let dy = 0; dy < blockSize; dy++) {
                             for (let dx = 0; dx < blockSize; dx++) {
                                 const index = ((y + dy) * canvas.width + (x + dx)) * 4;
                                 if (index >= data.length) continue;
                                 if (erase) {
-                                    data[index + 3] = 0; // 设为完全透明
+                                    data[index + 3] = 0;
                                 } else {
-                                    // 变暗，模拟磨损
                                     data[index] = Math.floor(data[index] * 0.4);
                                     data[index + 1] = Math.floor(data[index + 1] * 0.4);
                                     data[index + 2] = Math.floor(data[index + 2] * 0.4);
@@ -155,7 +184,6 @@
             }
             ctx.putImageData(imageData, 0, 0);
 
-            // 添加一些细微的噪点，模拟出土颗粒
             const noiseData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             for (let i = 0; i < noiseData.data.length; i += 4) {
                 if (noiseData.data[i + 3] > 0) {
@@ -170,7 +198,6 @@
             return canvas;
         }
 
-        // 现代字：光滑金属质感，无残破
         function createModernTexture(character) {
             const canvas = document.createElement('canvas');
             canvas.width = 256;
@@ -180,24 +207,21 @@
             ctx.font = 'bold 180px "Songti SC", "宋体", "SimSun", serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            // 银灰色
             ctx.fillStyle = '#c0c0c0';
             ctx.fillText(character, 128, 128);
             return canvas;
         }
 
-        // 从 Canvas 创建 A-Frame 图像实体（平面，始终面向相机？不，保持漂浮）
         function createCharacterEntity(character, textureCanvas, width = 0.8, height = 0.8) {
             const entity = document.createElement('a-image');
             entity.setAttribute('src', textureCanvas.toDataURL());
             entity.setAttribute('width', width);
             entity.setAttribute('height', height);
-            // 透明背景混合
             entity.setAttribute('material', 'transparent: true; alphaTest: 0.1; depthWrite: false');
             return entity;
         }
 
-        // ==================== 古字、现代字数据 ====================
+        // ==================== 古字与现代字数据 ====================
         const ANCIENT_CHARS = [
             { char: '耒', id: 'lei' }, { char: '蓑', id: 'suo' }, { char: '碓', id: 'dui' },
             { char: '罾', id: 'zeng' }, { char: '戽', id: 'hu' }, { char: '豳', id: 'bin' },
@@ -210,11 +234,9 @@
 
         // ==================== 主函数 ====================
         async function runARExperience() {
-            // 初始化音效
             AudioManager.init();
             const scene = document.querySelector('a-scene');
 
-            // 第一幕：苏醒
             AudioManager.startDrone();
             playPoemSequence(POEM_LINES.act1, 3000);
 
@@ -230,10 +252,8 @@
                 });
             }
 
-            // 逐个创建并显示古字
             for (let i = 0; i < total; i++) {
                 await new Promise(resolve => setTimeout(resolve, 1500));
-
                 const data = ANCIENT_CHARS[i];
                 const textureCanvas = createAncientTexture(data.char);
                 const entity = createCharacterEntity(data.char, textureCanvas);
@@ -241,7 +261,6 @@
                 entity.setAttribute('id', `char-${data.id}`);
                 entity.setAttribute('position', '0 0.5 -2');
                 entity.setAttribute('scale', '0.01 0.01 0.01');
-                // 随机旋转
                 const rotX = (Math.random() - 0.5) * 60;
                 const rotY = Math.random() * 360;
                 const rotZ = (Math.random() - 0.5) * 30;
@@ -262,7 +281,6 @@
 
             await new Promise(r => setTimeout(r, 4000));
 
-            // 点击提示
             ANCIENT_CHARS.forEach(data => {
                 const entity = document.getElementById(`char-${data.id}`);
                 if (entity) {
@@ -272,7 +290,6 @@
                 }
             });
 
-            // 第二幕：现代字掉落
             playPoemSequence(POEM_LINES.act2, 3000);
             for (let i = 0; i < MODERN_CHARS.length; i++) {
                 await new Promise(resolve => {
@@ -300,7 +317,6 @@
             }
             await new Promise(r => setTimeout(r, 3000));
 
-            // 第三幕：重排成诗
             AudioManager.stopDrone();
             playPoemSequence(POEM_LINES.act3, 3500);
             for (let i = 0; i < total; i++) {
@@ -329,25 +345,23 @@
             });
         }
 
-        // ==================== 启动逻辑 ====================
+        // ==================== 启动按钮 ====================
         document.getElementById('start-button').addEventListener('click', () => {
             document.getElementById('start-screen').style.display = 'none';
-            // 请求陀螺仪权限（iOS）
             if (typeof DeviceOrientationEvent !== 'undefined' &&
                 typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
                     .then(permissionState => {
-                        if (permissionState === 'granted') start();
+                        if (permissionState === 'granted') {
+                            if (navigator.vibrate) navigator.vibrate(300);
+                            runARExperience();
+                        }
                     }).catch(console.error);
             } else {
-                start();
+                if (navigator.vibrate) navigator.vibrate(300);
+                runARExperience();
             }
         });
-
-        function start() {
-            if (navigator.vibrate) navigator.vibrate(300);
-            runARExperience();
-        }
     </script>
 </body>
 </html>
